@@ -4,7 +4,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.mjs';
 const $ = (s) => document.querySelector(s);
 // touched = veld-ID's wat hierdie gebruiker verander het sedert die laaste stoor.
 // Net dié word gestuur, sodat spanlede nie mekaar se inskrywings oorskryf nie.
-const state = { id: null, pdf: null, fields: [], values: {}, scale: 1.4, viewports: [],
+const state = { id: null, pdf: null, fields: [], values: {}, scale: 1.4, viewports: [], selection: [],
   touched: new Set(), layoutChanged: false, name: '' };
 const params = new URLSearchParams(location.search);
 // Span-modus (?span=1): net invul, teken, stoor en aflaai
@@ -43,7 +43,10 @@ async function openForm(id) {
 
 async function load(form) {
   Object.assign(state, { id: form.id, name: form.name, fields: form.fields, values: form.values || {},
-    selected: null, touched: new Set(), layoutChanged: false });
+    selected: null, selection: [], touched: new Set(), layoutChanged: false,
+    defaults: { font: 'helvetica', ...form.defaults } });
+  if (!TEAM) splitWideCombs();
+  showDefaults();
   history.replaceState(null, '', `?form=${form.id}${TEAM ? '&span=1' : ''}`);
   document.title = `${form.name} – PDF-invul`;
   $('#forms').value = form.id;
@@ -52,6 +55,34 @@ async function load(form) {
   state.pdf = await pdfjsLib.getDocument(`/api/pdf/${form.id}`).promise;
   await render();
   for (const b of ['#dlFlat', '#addField', '#addSig', '#save', '#share', '#delForm']) $(b).disabled = false;
+}
+
+// Ouer vorms het tabelrye as een "kam"-veld (een letter per sel) gestoor. Blokkies wyer as
+// 35 punte is eintlik tabelselle: verdeel hulle in aparte velde, met enige letters wat al
+// ingetik is in die ooreenstemmende sel.
+function splitWideCombs() {
+  const out = [];
+  let fixed = 0;
+  for (const f of state.fields) {
+    if (!(f.comb > 1 && f.width / f.comb > 35)) { out.push(f); continue; }
+    fixed++;
+    const w = f.width / f.comb, chars = [...String(state.values[f.id] || '')];
+    const base = f.name.replace(/\s*\(\d+\)$/, '');
+    for (let i = 0; i < f.comb; i++) {
+      const { comb, ...rest } = f;
+      const cell = { ...rest, id: `${f.id}_${i + 1}`, name: `${base} ${i + 1}`, x: f.x + i * w + 1, width: w - 2 };
+      out.push(cell);
+      if (chars[i]) { state.values[cell.id] = chars[i]; state.touched.add(cell.id); }
+    }
+    delete state.values[f.id];
+  }
+  if (!fixed) return;
+  state.fields = out;
+  state.layoutChanged = true;
+  queueMicrotask(() => {
+    markDirty();
+    status(`${fixed} table row(s) were one wide field with spaced letters; split into separate cells. Saving…`);
+  });
 }
 
 // Enige verandering aan 'n waarde gaan hierdeur
@@ -88,7 +119,7 @@ async function doSave(auto) {
   const sent = new Map([...state.touched].map((k) => [k, state.values[k] ?? '']));
   const sendLayout = !TEAM && state.layoutChanged;
   const body = { values: Object.fromEntries(sent) };
-  if (sendLayout) body.fields = state.fields;
+  if (sendLayout) { body.fields = state.fields; body.defaults = state.defaults; }
   state.touched.clear();
   state.layoutChanged = false;
   if (!auto) status('Saving…');
@@ -250,6 +281,8 @@ function drawFields() {
       holder.append(box);
     } else {
       const inp = el('input', 'fld');
+      inp.spellcheck = false;
+      inp.autocomplete = 'off';
       inp.value = state.values[f.id] || '';
       if (f.comb > 1) {
         inp.maxLength = f.comb;
@@ -259,11 +292,11 @@ function drawFields() {
       const font = FONTS[f.font] || FONTS.helvetica;
       inp.style.fontFamily = font.css;
       inp.style.fontWeight = font.weight;
+      if (!(f.comb > 1)) inp.style.textAlign = alignOf(f);
       inp.style.fontSize = (f.fontSize ? f.fontSize * state.scale : Math.min(r.height * 0.75, 11 * state.scale)) + 'px';
       if (f.type === 'number') {
         // Net syfers (plus . , - en spasie vir bedrae); regs belyn soos bedrae gewoonlik is
         inp.inputMode = 'decimal';
-        if (!(f.comb > 1)) inp.style.textAlign = 'right';
         inp.addEventListener('beforeinput', (e) => {
           if (e.data && /[^\d.,\- ]/.test(e.data)) e.preventDefault();
         });
@@ -280,7 +313,7 @@ function drawFields() {
     del.addEventListener('click', () => removeField(f));
     holder.append(del);
     holder.fieldRef = f;
-    if (f === state.selected) holder.classList.add('selected');
+    if (state.selection.includes(f)) holder.classList.add('selected');
     makeDraggable(holder, f);
     makeDropTarget(holder, f);
     layer.append(holder);
@@ -290,25 +323,44 @@ function drawFields() {
 function makeDraggable(holder, f) {
   holder.addEventListener('pointerdown', (e) => {
     if (e.target.classList.contains('del')) return;
-    select(f);
-    if (!document.body.classList.contains('editing')) return;
+    const editing = document.body.classList.contains('editing');
+    // Ctrl+klik (of Cmd op Mac) voeg by die keuse of haal daaruit, sonder om te sleep
+    if (editing && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      document.activeElement?.blur();
+      select(f, true);
+      return;
+    }
+    // Klik op 'n veld wat reeds deel van 'n groep is: hou die groep, sodat dit saam sleep
+    if (!state.selection.includes(f)) select(f);
+    else { state.selected = f; showProps(); }
+    if (!editing) return;
     e.preventDefault();
     document.activeElement?.blur(); // sodat Ctrl+C/V/D die veld kopieer, nie teks in die paneel nie
     const sx = e.clientX, sy = e.clientY, m0 = holder.style.cssText;
-    const ox = parseFloat(holder.style.left), oy = parseFloat(holder.style.top);
     const w = parseFloat(holder.style.width), h = parseFloat(holder.style.height);
     const box = holder.getBoundingClientRect();
-    // Regterrand = breedte, onderrand = hoogte, hoek = albei
+    // Regterrand = breedte, onderrand = hoogte, hoek = albei (net vir die veld self)
     const resizeW = e.clientX > box.right - 8, resizeH = e.clientY > box.bottom - 6;
+    // Skuif: al die gekose velde beweeg saam
+    const group = resizeW || resizeH ? [holder]
+      : [...document.querySelectorAll('.holder')].filter((x) => state.selection.includes(x.fieldRef));
+    const start = group.map((x) => [parseFloat(x.style.left), parseFloat(x.style.top)]);
     const move = (m) => {
       if (resizeW) holder.style.width = Math.max(6, w + m.clientX - sx) + 'px';
       if (resizeH) holder.style.height = Math.max(6, h + m.clientY - sy) + 'px';
-      if (!resizeW && !resizeH) { holder.style.left = ox + m.clientX - sx + 'px'; holder.style.top = oy + m.clientY - sy + 'px'; }
+      if (!resizeW && !resizeH) group.forEach((x, i) => {
+        x.style.left = start[i][0] + m.clientX - sx + 'px';
+        x.style.top = start[i][1] + m.clientY - sy + 'px';
+      });
     };
     const up = () => {
       removeEventListener('pointermove', move); removeEventListener('pointerup', up);
-      Object.assign(f, toPdf(f.pageIndex, parseFloat(holder.style.left), parseFloat(holder.style.top),
-        parseFloat(holder.style.width), parseFloat(holder.style.height)));
+      for (const x of group) {
+        const g = x.fieldRef;
+        Object.assign(g, toPdf(g.pageIndex, parseFloat(x.style.left), parseFloat(x.style.top),
+          parseFloat(x.style.width), parseFloat(x.style.height)));
+      }
       if (m0 !== holder.style.cssText) layoutChanged();
       if (resizeW || resizeH) drawFields();
       showProps();
@@ -412,25 +464,64 @@ $('#addField').addEventListener('click', () => addAtCenter('text', 150, 15));
 $('#addSig').addEventListener('click', () => addAtCenter('signature', 170, 40));
 
 let nextId = 1;
-function insertField(pageIndex, type, rect, focusName = true) {
+// Skep 'n veld sonder om dit te kies of te teken (vir plak van groepe)
+function makeField(pageIndex, type, rect, extra = {}) {
   const label = { checkbox: 'Checkbox', signature: 'Sign here' }[type] || 'Field';
   const f = { id: `u${Date.now()}_${nextId}`, name: `${label} ${nextId++}`,
-    type, pageIndex, font: 'helvetica', ...rect };
+    type, pageIndex, ...fieldStyle(), ...extra, ...rect };
   state.fields.push(f);
+  return f;
+}
+
+// Vorm-styl: verstek-font, -grootte en -belyning. Nuwe velde kry dit; "Apply to all fields"
+// kopieer dit na elke teks-/getalveld. Daarna kan elke veld steeds apart verander word.
+const fieldStyle = () => {
+  const { font, fontSize, align } = state.defaults || {};
+  return { font: font || 'helvetica', ...(fontSize ? { fontSize } : {}), ...(align ? { align } : {}) };
+};
+function showDefaults() {
+  const d = state.defaults || {};
+  $('#dFont').value = d.font || 'helvetica';
+  $('#dSize').value = d.fontSize || '';
+  $('#dAlign').value = d.align || '';
+}
+function readDefaults() {
+  const size = parseFloat($('#dSize').value);
+  state.defaults = { font: $('#dFont').value, fontSize: size > 0 ? size : undefined, align: $('#dAlign').value || undefined };
+  layoutChanged();
+}
+for (const id of ['#dFont', '#dSize', '#dAlign']) $(id).addEventListener('change', readDefaults);
+$('#dApply').addEventListener('click', () => {
+  const targets = state.fields.filter(isTextLike);
+  if (!targets.length) return;
+  if (!confirm(`Apply this font, size and alignment to all ${targets.length} text and number fields? ` +
+    'Any changes you made to individual fields will be overwritten.')) return;
+  readDefaults();
+  const { font, fontSize, align } = state.defaults;
+  for (const f of targets) Object.assign(f, { font, fontSize, align });
+  layoutChanged();
+  drawFields();
+  showProps();
+  status(`Style applied to ${targets.length} fields.`);
+});
+function insertField(pageIndex, type, rect, focusName = true) {
+  const f = makeField(pageIndex, type, rect);
   layoutChanged();
   select(f);
   drawFields();
   if (focusName) $('#pName').select();
 }
 
-function removeField(f) {
-  state.fields = state.fields.filter((x) => x !== f);
-  delete state.values[f.id];
-  state.touched.delete(f.id);
+function removeFields(list) {
+  const gone = new Set(list);
+  state.fields = state.fields.filter((x) => !gone.has(x));
+  for (const f of list) { delete state.values[f.id]; state.touched.delete(f.id); }
   layoutChanged();
-  if (state.selected === f) select(null);
+  const left = state.selection.filter((x) => !gone.has(x));
+  select(left.at(-1) || null, false, left);
   drawFields();
 }
+const removeField = (f) => removeFields([f]);
 
 // Eienskappe-paneel. X/Y word gewys van links-bo van die bladsy (punte),
 // terwyl die PDF self van links-onder meet.
@@ -443,18 +534,34 @@ const FONTS = {
 };
 const r1 = (n) => Math.round(n * 10) / 10;
 const isTextLike = (f) => f.type === 'text' || f.type === 'number'; // velde met font, grootte en kam
+// Belyning: gekies deur die gebruiker, anders getalle regs en teks links (moet ooreenstem met fill.mjs)
+const alignOf = (f) => f.align || (f.type === 'number' ? 'right' : 'left');
 const pageBox = (f) => state.viewports[f.pageIndex].viewBox; // [x0, y0, x1, y1]
 
-function select(f) {
+// Keuse: state.selection is al die gekose velde; state.selected die laaste een (vir die paneel).
+// additive = Ctrl+klik: voeg by of haal uit. list = stel die hele keuse.
+function select(f, additive = false, list = null) {
+  if (list) state.selection = list;
+  else if (additive && f) {
+    state.selection = state.selection.includes(f)
+      ? state.selection.filter((x) => x !== f)
+      : [...state.selection, f];
+    if (!state.selection.includes(f)) f = state.selection.at(-1) || null;
+  } else state.selection = f ? [f] : [];
   state.selected = f;
-  document.querySelectorAll('.holder').forEach((h) => h.classList.toggle('selected', h.fieldRef === f));
+  document.querySelectorAll('.holder').forEach((h) => h.classList.toggle('selected', state.selection.includes(h.fieldRef)));
   showProps();
 }
 
 function showProps() {
   const f = state.selected;
+  const many = state.selection.length > 1;
   $('#props').hidden = !f;
   if (!f) return;
+  $('#pTitle').textContent = many ? `${state.selection.length} fields selected` : 'Field';
+  $('#pSingle').hidden = many;
+  $('#pMulti').hidden = !many;
+  $('#pDelete').textContent = many ? `Delete ${state.selection.length} fields` : 'Delete field';
   const [x0, , , y1] = pageBox(f);
   $('#pName').value = f.name || '';
   $('#pType').value = f.type;
@@ -464,12 +571,27 @@ function showProps() {
   $('#pH').value = r1(f.height);
   $('#pSize').value = f.fontSize || '';
   $('#pFont').value = f.font || 'helvetica';
-  $('#pSize').disabled = $('#pFont').disabled = !isTextLike(f);
+  $('#pAlign').value = f.align || '';
+  $('#pComb').value = f.comb > 1 ? f.comb : '';
+  $('#pComb').disabled = !isTextLike(f);
+  $('#pSize').disabled = $('#pFont').disabled = $('#pAlign').disabled = !state.selection.some(isTextLike);
 }
 
-function applyProps() {
+function applyProps(e) {
   const f = state.selected;
   if (!f) return;
+  if (state.selection.length > 1) {
+    // Groep: net die font, grootte of belyning wat verander is, op al die teks-/getalvelde
+    const size = parseFloat($('#pSize').value);
+    for (const g of state.selection.filter(isTextLike)) {
+      if (e?.target === $('#pSize')) g.fontSize = size > 0 ? size : undefined;
+      if (e?.target === $('#pFont')) g.font = $('#pFont').value;
+      if (e?.target === $('#pAlign')) g.align = $('#pAlign').value || undefined;
+    }
+    layoutChanged();
+    drawFields();
+    return;
+  }
   const [x0, , , y1] = pageBox(f);
   const num = (id, fallback) => { const v = parseFloat($(id).value); return Number.isFinite(v) ? v : fallback; };
   f.name = $('#pName').value.trim() || f.name;
@@ -480,47 +602,56 @@ function applyProps() {
   f.y = y1 - num('#pY', y1 - (f.y + f.height)) - f.height;
   f.fontSize = num('#pSize', 0) || undefined;
   f.font = $('#pFont').value;
-  if (!isTextLike(f)) delete f.comb;
+  f.align = $('#pAlign').value || undefined;
+  const comb = parseInt($('#pComb').value, 10);
+  if (isTextLike(f) && comb > 1) f.comb = comb; else delete f.comb;
   layoutChanged();
   drawFields();
-  $('#pSize').disabled = $('#pFont').disabled = !isTextLike(f);
+  $('#pSize').disabled = $('#pFont').disabled = $('#pAlign').disabled = !isTextLike(f);
 }
-for (const id of ['#pName', '#pType', '#pX', '#pY', '#pW', '#pH', '#pSize', '#pFont']) {
+for (const id of ['#pName', '#pType', '#pX', '#pY', '#pW', '#pH', '#pSize', '#pFont', '#pAlign', '#pComb']) {
   $(id).addEventListener('change', applyProps);
-  $(id).addEventListener('input', () => { if (id !== '#pName') applyProps(); });
+  $(id).addEventListener('input', (e) => { if (id !== '#pName') applyProps(e); });
 }
-$('#pDelete').addEventListener('click', () => state.selected && removeField(state.selected));
+$('#pDelete').addEventListener('click', () => state.selection.length && removeFields(state.selection));
 
-// Kopieer / plak / dupliseer. Die kopie behou grootte, font en tipe; dit word
-// op die bladsy geplak wat nou sigbaar is, effens verskuif van die oorspronklike.
-let clipboard = null;
+// Kopieer / plak / dupliseer, vir een veld of 'n hele groep. Die kopieë behou grootte,
+// font, tipe en hul posisie ten opsigte van mekaar.
+let clipboard = null; // [{...veld sonder id}]
 function copyField() {
-  if (!state.selected) return;
-  const { id, name, ...rest } = state.selected;
-  clipboard = { ...rest, name };
+  if (!state.selection.length) return;
+  clipboard = state.selection.map(({ id, ...rest }) => ({ ...rest }));
   $('#pPaste').disabled = false;
-  status(`"${name}" copied. Press Ctrl+V or "Paste" to paste it.`);
+  status(clipboard.length > 1
+    ? `${clipboard.length} fields copied. Press Ctrl+V or "Paste" to paste them.`
+    : `"${clipboard[0].name}" copied. Press Ctrl+V or "Paste" to paste it.`);
 }
 function pasteField(dx = 10, dy = -10, pageIndex = visiblePage()) {
-  if (!clipboard) return;
-  const same = pageIndex === clipboard.pageIndex;
-  const [x0, , , y1] = state.viewports[pageIndex].viewBox;
-  insertField(pageIndex, clipboard.type, {
-    width: clipboard.width, height: clipboard.height,
-    x: same ? clipboard.x + dx : x0 + clipboard.x - pageBox(clipboard)[0],
-    y: same ? clipboard.y + dy : y1 - (pageBox(clipboard)[3] - clipboard.y),
-  }, false);
-  Object.assign(state.selected, { font: clipboard.font, fontSize: clipboard.fontSize, comb: clipboard.comb,
-    name: `${clipboard.name.replace(/( \(copy\))+$/, '')} (copy)` });
-  clipboard = { ...clipboard, x: state.selected.x, y: state.selected.y, pageIndex }; // volgende plak skuif weer
+  if (!clipboard?.length) return;
+  const [tx0, , , ty1] = state.viewports[pageIndex].viewBox;
+  const pasted = clipboard.map((c) => {
+    const same = c.pageIndex === pageIndex;
+    const [x0, , , y1] = pageBox(c);
+    // Ander bladsy: dieselfde posisie van links-bo af
+    const rect = { width: c.width, height: c.height,
+      x: same ? c.x + dx : tx0 + (c.x - x0), y: same ? c.y + dy : ty1 - (y1 - c.y) };
+    const { x, y, width, height, pageIndex: _p, type, ...extra } = c;
+    extra.name = `${c.name.replace(/( \(copy\))+$/, '')} (copy)`;
+    return makeField(pageIndex, type, rect, extra);
+  });
+  // Volgende plak skuif weer 'n entjie verder
+  clipboard = pasted.map(({ id, ...rest }) => ({ ...rest }));
+  layoutChanged();
+  select(pasted.at(-1), false, pasted);
   drawFields();
-  showProps();
 }
 function duplicateBelow() {
-  if (!state.selected) return;
-  const f = state.selected;
+  const list = state.selection;
+  if (!list.length) return;
+  if (new Set(list.map((f) => f.pageIndex)).size > 1) return status('Duplicate below only works for fields on one page.');
+  const top = Math.max(...list.map((f) => f.y + f.height)), bottom = Math.min(...list.map((f) => f.y));
   copyField();
-  pasteField(0, -(f.height + 2), f.pageIndex); // direk onder die oorspronklike
+  pasteField(0, -(top - bottom + 2), list[0].pageIndex); // direk onder die groep
 }
 $('#pCopy').addEventListener('click', copyField);
 $('#pPaste').addEventListener('click', () => pasteField());
@@ -533,15 +664,23 @@ function visiblePage() {
   return i < 0 ? 0 : i;
 }
 
+// Ctrl+A: kies al die velde op die bladsy wat sigbaar is
+function selectPage() {
+  const list = state.fields.filter((f) => f.pageIndex === visiblePage());
+  select(list.at(-1) || null, false, list);
+}
+
 // Sleutels. Ctrl+S stoor altyd; die res net in wysig-modus, en nie terwyl jy in 'n invoerveld tik nie.
 addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save(); return; }
   if (!document.body.classList.contains('editing') || /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
-  const k = e.key.toLowerCase();
-  if (e.key === 'Delete' && state.selected) removeField(state.selected);
-  else if ((e.ctrlKey || e.metaKey) && k === 'c' && state.selected) { e.preventDefault(); copyField(); }
-  else if ((e.ctrlKey || e.metaKey) && k === 'v' && clipboard) { e.preventDefault(); pasteField(); }
-  else if ((e.ctrlKey || e.metaKey) && k === 'd' && state.selected) { e.preventDefault(); duplicateBelow(); }
+  const k = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey;
+  if (e.key === 'Delete' && state.selection.length) removeFields(state.selection);
+  else if (e.key === 'Escape') select(null);
+  else if (mod && k === 'a') { e.preventDefault(); selectPage(); }
+  else if (mod && k === 'c' && state.selection.length) { e.preventDefault(); copyField(); }
+  else if (mod && k === 'v' && clipboard) { e.preventDefault(); pasteField(); }
+  else if (mod && k === 'd' && state.selection.length) { e.preventDefault(); duplicateBelow(); }
 });
 
 // Stoor eers, dan laai die bediener die ingevulde PDF (met handtekeninge) af

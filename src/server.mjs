@@ -119,6 +119,11 @@ app.put('/api/forms/:id', async (req, res) => {
   if (owner && Array.isArray(fields)) form.fields = fields;
   if (values && typeof values === 'object') Object.assign(form.values, values);
   if (owner && typeof name === 'string' && name.trim()) form.name = name.trim();
+  // Verstek-styl vir die vorm (font, grootte, belyning) vir nuwe velde
+  const { defaults } = req.body;
+  if (owner && defaults && typeof defaults === 'object') {
+    form.defaults = { font: defaults.font, fontSize: defaults.fontSize, align: defaults.align };
+  }
   const ids = new Set(form.fields.map((f) => f.id));
   for (const k of Object.keys(form.values)) if (!ids.has(k)) delete form.values[k];
   await writeForm(form);
