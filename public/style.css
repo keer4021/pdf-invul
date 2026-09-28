@@ -78,3 +78,16 @@ dialog .primary { background: var(--accent); color: #fff; }
 a.btn { text-decoration: none; }
 #loginPw { width: 100%; font: inherit; padding: 6px 8px; border: 1px solid #c4c8d0; border-radius: 6px; }
 #loginErr { color: #c0392b; }
+/* Veld-paneel net sigbaar in wysig-modus */
+body:not(.editing) #props { display: none; }
+/* Die bladsy-area is 'n eie skuifvenster wat die skerm vul, sodat die skuifbalk
+   (links-regs en op-af) altyd sigbaar is, ook as jy inzoem */
+body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+header { position: static; flex: 0 0 auto; }
+.wrap { flex: 1; min-height: 0; align-items: stretch; }
+aside { position: static; max-height: none; overflow-y: auto; }
+.content { flex: 1; min-width: 0; overflow: auto; scrollbar-gutter: stable; }
+main { align-items: safe center; width: max-content; min-width: 100%; }
+.content::-webkit-scrollbar { width: 12px; height: 12px; }
+.content::-webkit-scrollbar-thumb { background: #b9bec8; border-radius: 6px; border: 2px solid var(--bg); }
+.content::-webkit-scrollbar-track { background: var(--bg); }

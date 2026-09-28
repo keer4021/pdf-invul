@@ -57,8 +57,10 @@ export async function fillFlat(bytes, fields, values) {
       // Vaste grootte as die gebruiker een gekies het, anders krimp tot dit pas
       let size = f.fontSize || Math.min(11, f.height * 0.8);
       if (!f.fontSize) while (size > 5 && font.widthOfTextAtSize(text, size) > f.width - 2) size -= 0.5;
+      // Getalle regs belyn, teks links
+      const x = f.type === 'number' ? f.x + f.width - 2 - font.widthOfTextAtSize(text, size) : f.x + 2;
       page.drawText(text, {
-        x: f.x + 2, y: f.y + Math.max(2, (f.height - size) / 2 + 1),
+        x, y: f.y + Math.max(2, (f.height - size) / 2 + 1),
         size, font, color: rgb(0, 0, 0.55),
       });
     }

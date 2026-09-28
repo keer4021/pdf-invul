@@ -30,13 +30,13 @@ const cookies = (req) => Object.fromEntries((req.get('cookie') || '').split(';')
   .map((c) => c.trim().split('=')).filter(([k]) => k).map(([k, ...v]) => [k, decodeURIComponent(v.join('='))]));
 const safeEqual = (a, b) => a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 const isOwner = (req) => !OWNER_PASSWORD || safeEqual(cookies(req).owner || '', ownerToken);
-const requireOwner = (req, res, next) => (isOwner(req) ? next() : res.status(401).json({ error: 'Meld eers aan.' }));
+const requireOwner = (req, res, next) => (isOwner(req) ? next() : res.status(401).json({ error: 'Please sign in first.' }));
 
 const failures = new Map(); // ip -> { n, until }: sluit 15 min uit na 5 verkeerde wagwoorde
 app.post('/api/login', async (req, res) => {
   const ip = req.get('cf-connecting-ip') || req.ip;
   const f = failures.get(ip) || { n: 0, until: 0 };
-  if (f.until > Date.now()) return res.status(429).json({ error: 'Te veel pogings. Probeer oor 15 minute weer.' });
+  if (f.until > Date.now()) return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
   const pw = String(req.body?.password || '');
   if (!OWNER_PASSWORD || !safeEqual(crypto.createHash('sha256').update(pw).digest('hex'),
     crypto.createHash('sha256').update(OWNER_PASSWORD).digest('hex'))) {
@@ -44,7 +44,7 @@ app.post('/api/login', async (req, res) => {
     if (f.n >= 5) Object.assign(f, { n: 0, until: Date.now() + 15 * 60e3 });
     failures.set(ip, f);
     await new Promise((r) => setTimeout(r, 700));
-    return res.status(401).json({ error: 'Verkeerde wagwoord.' });
+    return res.status(401).json({ error: 'Wrong password.' });
   }
   failures.delete(ip);
   const secure = req.secure || req.get('x-forwarded-proto') === 'https' ? '; Secure' : '';
@@ -72,7 +72,7 @@ async function writeForm(form) {
   form.updatedAt = new Date().toISOString();
   await writeFile(path.join(dir(form.id), 'form.json'), JSON.stringify(form, null, 1));
 }
-const pdfName = (form) => form.name.replace(/\.pdf$/i, '').replace(/[^\w\- ]+/g, '_') + '-ingevul.pdf';
+const pdfName = (form) => form.name.replace(/\.pdf$/i, '').replace(/[^\w\- ]+/g, '_') + '-filled.pdf';
 async function renderFilled(form) {
   const bytes = await fs.readFile(path.join(dir(form.id), 'original.pdf'));
   return fillFlat(bytes, form.fields, form.values);
@@ -85,7 +85,7 @@ app.post('/api/upload', requireOwner, express.raw({ type: 'application/pdf', lim
   try {
     const bytes = new Uint8Array(req.body);
     const { source, fields } = await detectFields(bytes);
-    const form = { id: crypto.randomUUID(), name: decodeURIComponent(req.get('x-filename') || 'vorm.pdf'),
+    const form = { id: crypto.randomUUID(), name: decodeURIComponent(req.get('x-filename') || 'form.pdf'),
       source, fields, values: {}, createdAt: new Date().toISOString() };
     await fs.mkdir(dir(form.id), { recursive: true });
     await fs.writeFile(path.join(dir(form.id), 'original.pdf'), bytes);
@@ -93,7 +93,7 @@ app.post('/api/upload', requireOwner, express.raw({ type: 'application/pdf', lim
     res.json(form);
   } catch (e) {
     console.error(e);
-    res.status(400).json({ error: 'Kon nie die PDF lees nie: ' + e.message });
+    res.status(400).json({ error: 'Could not read the PDF: ' + e.message });
   }
 });
 
@@ -126,7 +126,7 @@ app.put('/api/forms/:id', async (req, res) => {
   // Hou ook 'n ingevulde PDF langs die vorm, sodat dit direk in OneDrive oopgemaak kan word
   renderFilled(form)
     .then((out) => writeFile(path.join(dir(form.id), pdfName(form)), out))
-    .catch((e) => console.error('Kon nie ingevulde PDF skryf nie:', e.message));
+    .catch((e) => console.error('Could not write filled PDF:', e.message));
 });
 
 app.delete('/api/forms/:id', requireOwner, async (req, res) => {
@@ -164,6 +164,6 @@ app.get('/api/info', requireOwner, (_req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`PDF-invul loop op http://localhost:${port}\nVorms word gestoor in: ${DATA}`);
-  if (!OWNER_PASSWORD) console.warn('LET WEL: geen OWNER_PASSWORD in .env nie - enigiemand kan vorms oplaai en verwyder.');
+  console.log(`PDF-invul running at http://localhost:${port}\nForms are saved in: ${DATA}`);
+  if (!OWNER_PASSWORD) console.warn('WARNING: no OWNER_PASSWORD in .env - anyone can upload and delete forms.');
 });

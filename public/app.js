@@ -14,17 +14,17 @@ document.body.classList.toggle('team', TEAM);
 $('#file').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file || !(await confirmDiscard())) return;
-  status(`Besig om "${file.name}" te ontleed…`);
+  status(`Analysing "${file.name}"…`);
   const res = await fetch('/api/upload', {
     method: 'POST', body: file,
     headers: { 'Content-Type': 'application/pdf', 'X-Filename': encodeURIComponent(file.name) },
   });
   const data = await res.json();
   e.target.value = ''; // sodat dieselfde lêer weer gekies kan word
-  if (!res.ok) return status(data.error || 'Fout');
+  if (!res.ok) return status(data.error || 'Error');
   await load(data);
-  status(`${data.fields.length} velde bespeur (${data.source === 'acroform' ? 'bestaande vormvelde' : 'outomaties'}) ` +
-    `en gestoor. Tik "Wysig velde" aan om velde aan te pas.`);
+  status(`${data.fields.length} fields detected (${data.source === 'acroform' ? 'existing form fields' : 'automatically'}) ` +
+    `and saved. Tick "Edit fields" to adjust them.`);
   refreshForms();
 });
 $('#zoom').addEventListener('input', (e) => { state.scale = +e.target.value; render(); });
@@ -34,11 +34,11 @@ $('#save').addEventListener('click', () => save());
 
 async function openForm(id) {
   const res = await fetch(`/api/forms/${id}`);
-  if (!res.ok) return status('Hierdie vorm bestaan nie (meer) nie.');
+  if (!res.ok) return status('This form does not exist (any more).');
   await load(await res.json());
   status(TEAM
-    ? `Vul jou deel van "${state.name}" in en klik Stoor. Klik op 'n geel "Teken hier"-blok om te teken.`
-    : `"${state.name}" oopgemaak.`);
+    ? `Fill in your part of "${state.name}". Click a yellow "Sign here" box to sign. Your changes are saved automatically.`
+    : `Opened "${state.name}".`);
 }
 
 async function load(form) {
@@ -91,7 +91,7 @@ async function doSave(auto) {
   if (sendLayout) body.fields = state.fields;
   state.touched.clear();
   state.layoutChanged = false;
-  if (!auto) status('Stoor…');
+  if (!auto) status('Saving…');
   let form;
   try {
     const res = await fetch(`/api/forms/${state.id}`, {
@@ -103,7 +103,7 @@ async function doSave(auto) {
     for (const k of sent.keys()) state.touched.add(k);
     if (sendLayout) state.layoutChanged = true;
     $('#save').classList.add('dirty');
-    status('Kon nie stoor nie. Kontroleer dat die bediener loop en probeer weer (Ctrl+S).');
+    status('Could not save. Check that the server is running and try again (Ctrl+S).');
     return false;
   }
   // Neem ander se nuwe inskrywings oor, behalwe velde wat ek intussen verander het
@@ -111,14 +111,14 @@ async function doSave(auto) {
   $('#save').classList.toggle('dirty', isDirty());
   const active = document.activeElement;
   if (!active?.classList.contains('fld')) drawFields(); // moenie die veld waarin iemand tik vervang nie
-  status(`${auto ? 'Outomaties gestoor' : 'Gestoor'} om ${new Date().toLocaleTimeString()}.`);
+  status(`${auto ? 'Auto-saved' : 'Saved'} at ${new Date().toLocaleTimeString()}.`);
   refreshForms();
   if (isDirty()) scheduleSave();
   return true;
 }
 
 async function confirmDiscard() {
-  return !isDirty() || confirm('Jy het veranderinge wat nie gestoor is nie. Gaan voort sonder om te stoor?');
+  return !isDirty() || confirm('You have unsaved changes. Continue without saving?');
 }
 addEventListener('beforeunload', (e) => { if (isDirty()) e.preventDefault(); });
 
@@ -127,11 +127,11 @@ async function refreshForms() {
   if (TEAM) return;
   const forms = await (await fetch('/api/forms')).json();
   const sel = $('#forms');
-  sel.innerHTML = '<option value="">Gestoorde vorms…</option>';
+  sel.innerHTML = '<option value="">Saved forms…</option>';
   for (const f of forms) {
     const o = el('option');
     o.value = f.id;
-    o.textContent = `${f.name} (${f.filled}/${f.fields} ingevul)`;
+    o.textContent = `${f.name} (${f.filled}/${f.fields} filled)`;
     sel.append(o);
   }
   sel.value = state.id || '';
@@ -143,7 +143,7 @@ $('#forms').addEventListener('change', async (e) => {
   openForm(id);
 });
 $('#delForm').addEventListener('click', async () => {
-  if (!state.id || !confirm(`Verwyder "${state.name}" en al sy ingevulde inligting? Dit kan nie ontdoen word nie.`)) return;
+  if (!state.id || !confirm(`Delete "${state.name}" and everything filled in on it? This cannot be undone.`)) return;
   await fetch(`/api/forms/${state.id}`, { method: 'DELETE' });
   location.href = '/';
 });
@@ -159,17 +159,17 @@ $('#share').addEventListener('click', async () => {
   const url = `${base}/?form=${state.id}&span=1`;
   $('#shareUrl').value = url;
   $('#shareHint').textContent = publicUrl
-    ? 'Hierdie skakel werk van oral af, solank die bediener en die tunnel op hierdie rekenaar loop.'
-    : 'Spanlede moet op dieselfde netwerk wees as hierdie rekenaar, en die bediener moet loop.';
-  $('#shareMail').href = `mailto:?subject=${encodeURIComponent('Vul asseblief in: ' + state.name)}` +
-    `&body=${encodeURIComponent(`Hallo\n\nVul asseblief jou deel van "${state.name}" in en teken waar nodig:\n${url}\n\nKlik "Stoor" as jy klaar is.\n`)}`;
+    ? 'This link works from anywhere, as long as the server and tunnel are running on this computer.'
+    : 'Team members must be on the same network as this computer, and the server must be running.';
+  $('#shareMail').href = `mailto:?subject=${encodeURIComponent('Please complete: ' + state.name)}` +
+    `&body=${encodeURIComponent(`Hi\n\nPlease fill in your part of "${state.name}" and sign where needed:\n${url}\n\nYour changes are saved automatically.\n`)}`;
   $('#shareDlg').showModal();
   $('#shareUrl').select();
 });
 $('#shareCopy').addEventListener('click', async () => {
   try { await navigator.clipboard.writeText($('#shareUrl').value); } catch { $('#shareUrl').select(); document.execCommand('copy'); }
-  $('#shareCopy').textContent = 'Gekopieer ✓';
-  setTimeout(() => ($('#shareCopy').textContent = 'Kopieer skakel'), 1500);
+  $('#shareCopy').textContent = 'Copied ✓';
+  setTimeout(() => ($('#shareCopy').textContent = 'Copy link'), 1500);
 });
 $('#shareClose').addEventListener('click', () => $('#shareDlg').close());
 
@@ -229,11 +229,11 @@ function drawFields() {
         sig.classList.add('done');
         const img = el('img');
         img.src = v;
-        img.alt = 'Handtekening';
+        img.alt = 'Signature';
         sig.append(img);
       } else {
         const span = el('span');
-        span.textContent = '✍ Teken hier';
+        span.textContent = '✍ Sign here';
         sig.append(span);
       }
       sig.addEventListener('click', () => { if (!document.body.classList.contains('editing')) openSignature(f); });
@@ -260,12 +260,23 @@ function drawFields() {
       inp.style.fontFamily = font.css;
       inp.style.fontWeight = font.weight;
       inp.style.fontSize = (f.fontSize ? f.fontSize * state.scale : Math.min(r.height * 0.75, 11 * state.scale)) + 'px';
-      inp.addEventListener('input', () => setValue(f.id, inp.value));
+      if (f.type === 'number') {
+        // Net syfers (plus . , - en spasie vir bedrae); regs belyn soos bedrae gewoonlik is
+        inp.inputMode = 'decimal';
+        if (!(f.comb > 1)) inp.style.textAlign = 'right';
+        inp.addEventListener('beforeinput', (e) => {
+          if (e.data && /[^\d.,\- ]/.test(e.data)) e.preventDefault();
+        });
+      }
+      inp.addEventListener('input', () => {
+        if (f.type === 'number') inp.value = inp.value.replace(/[^\d.,\- ]/g, ''); // bv. as iets geplak word
+        setValue(f.id, inp.value);
+      });
       holder.append(inp);
     }
     const del = el('button', 'del');
     del.textContent = '×';
-    del.title = 'Verwyder veld';
+    del.title = 'Delete field';
     del.addEventListener('click', () => removeField(f));
     holder.append(del);
     holder.fieldRef = f;
@@ -328,7 +339,7 @@ function drawNames() {
     const del = el('button');
     del.type = 'button';
     del.textContent = '×';
-    del.title = 'Verwyder';
+    del.title = 'Remove';
     del.addEventListener('click', () => { names.splice(i, 1); saveNames(); });
     li.addEventListener('dragstart', (e) => {
       e.dataTransfer.setData('text/plain', n);
@@ -402,7 +413,7 @@ $('#addSig').addEventListener('click', () => addAtCenter('signature', 170, 40));
 
 let nextId = 1;
 function insertField(pageIndex, type, rect, focusName = true) {
-  const label = { checkbox: 'Blokkie', signature: 'Teken hier' }[type] || 'Veld';
+  const label = { checkbox: 'Checkbox', signature: 'Sign here' }[type] || 'Field';
   const f = { id: `u${Date.now()}_${nextId}`, name: `${label} ${nextId++}`,
     type, pageIndex, font: 'helvetica', ...rect };
   state.fields.push(f);
@@ -431,6 +442,7 @@ const FONTS = {
   courier: { css: '"Courier New", Courier, monospace', weight: 400 },
 };
 const r1 = (n) => Math.round(n * 10) / 10;
+const isTextLike = (f) => f.type === 'text' || f.type === 'number'; // velde met font, grootte en kam
 const pageBox = (f) => state.viewports[f.pageIndex].viewBox; // [x0, y0, x1, y1]
 
 function select(f) {
@@ -452,7 +464,7 @@ function showProps() {
   $('#pH').value = r1(f.height);
   $('#pSize').value = f.fontSize || '';
   $('#pFont').value = f.font || 'helvetica';
-  $('#pSize').disabled = $('#pFont').disabled = f.type !== 'text';
+  $('#pSize').disabled = $('#pFont').disabled = !isTextLike(f);
 }
 
 function applyProps() {
@@ -468,10 +480,10 @@ function applyProps() {
   f.y = y1 - num('#pY', y1 - (f.y + f.height)) - f.height;
   f.fontSize = num('#pSize', 0) || undefined;
   f.font = $('#pFont').value;
-  if (f.type !== 'text') delete f.comb;
+  if (!isTextLike(f)) delete f.comb;
   layoutChanged();
   drawFields();
-  $('#pSize').disabled = $('#pFont').disabled = f.type !== 'text';
+  $('#pSize').disabled = $('#pFont').disabled = !isTextLike(f);
 }
 for (const id of ['#pName', '#pType', '#pX', '#pY', '#pW', '#pH', '#pSize', '#pFont']) {
   $(id).addEventListener('change', applyProps);
@@ -487,7 +499,7 @@ function copyField() {
   const { id, name, ...rest } = state.selected;
   clipboard = { ...rest, name };
   $('#pPaste').disabled = false;
-  status(`"${name}" gekopieer. Druk Ctrl+V of "Plak" om dit te plak.`);
+  status(`"${name}" copied. Press Ctrl+V or "Paste" to paste it.`);
 }
 function pasteField(dx = 10, dy = -10, pageIndex = visiblePage()) {
   if (!clipboard) return;
@@ -499,7 +511,7 @@ function pasteField(dx = 10, dy = -10, pageIndex = visiblePage()) {
     y: same ? clipboard.y + dy : y1 - (pageBox(clipboard)[3] - clipboard.y),
   }, false);
   Object.assign(state.selected, { font: clipboard.font, fontSize: clipboard.fontSize, comb: clipboard.comb,
-    name: `${clipboard.name.replace(/( \(kopie\))+$/, '')} (kopie)` });
+    name: `${clipboard.name.replace(/( \(copy\))+$/, '')} (copy)` });
   clipboard = { ...clipboard, x: state.selected.x, y: state.selected.y, pageIndex }; // volgende plak skuif weer
   drawFields();
   showProps();
@@ -538,7 +550,7 @@ async function download() {
   const a = el('a');
   a.href = `/api/download/${state.id}`;
   a.click();
-  status('Ingevulde PDF word afgelaai…');
+  status('Downloading filled PDF…');
 }
 
 // Handtekening: teken op 'n canvas (muis, vinger of pen) of laai 'n prent op.
@@ -582,7 +594,7 @@ $('#sigFile').addEventListener('change', (e) => {
   img.src = URL.createObjectURL(file);
 });
 $('#sigOk').addEventListener('click', () => {
-  if (!sigHasInk) return alert("Teken eers jou handtekening, of laai 'n prent op.");
+  if (!sigHasInk) return alert('Draw your signature first, or upload an image.');
   setValue(sigField.id, trimCanvas(pad).toDataURL('image/png'));
   $('#sigDlg').close();
   drawFields();
@@ -630,4 +642,4 @@ $('#logout').addEventListener('click', async () => {
 if (!TEAM) await ensureOwner();
 refreshForms();
 if (params.get('form')) openForm(params.get('form'));
-else if (TEAM) status("Hierdie skakel is onvolledig. Vra vir 'n nuwe skakel.");
+else if (TEAM) status('This link is incomplete. Ask for a new link.');

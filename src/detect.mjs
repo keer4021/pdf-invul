@@ -105,14 +105,14 @@ async function detectHeuristic(bytes) {
       cols.set(key, n);
       f.row = n;
     }
-    for (const f of kept) if (f.row && cols.get(`${f.label}@${Math.round(f.x)}`) > 1) f.label += ` ry ${f.row}`;
+    for (const f of kept) if (f.row && cols.get(`${f.label}@${Math.round(f.x)}`) > 1) f.label += ` row ${f.row}`;
     fields.push(...kept);
   }
   // Etikette vir blokkies sonder etiket: naaste teks regs daarvan
   return fields.map((f, i) => ({
     ...f,
     id: `f${i + 1}`,
-    name: `${f.label || (f.type === 'checkbox' ? 'Blokkie' : 'Veld')} (${i + 1})`,
+    name: `${f.label || (f.type === 'checkbox' ? 'Checkbox' : 'Field')} (${i + 1})`,
   }));
 }
 

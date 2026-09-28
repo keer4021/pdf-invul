@@ -17,14 +17,14 @@ const args = process.env.TUNNEL_TOKEN
   : ['tunnel', '--no-autoupdate', '--url', `http://localhost:${port}`];
 const tunnel = spawn(cloudflared, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 tunnel.on('error', (e) => {
-  console.error(`Kon nie ${cloudflared} begin nie (${e.message}). Sien die README om dit af te laai.`);
+  console.error(`Could not start ${cloudflared} (${e.message}). See the README for how to download it.`);
   process.exit(1);
 });
 
 let server;
 function startServer(publicUrl) {
   if (server) return;
-  console.log(`\nPublieke adres: ${publicUrl}\n`);
+  console.log(`\nPublic address: ${publicUrl}\n`);
   server = spawn(process.execPath, [path.join(root, 'src', 'server.mjs')], {
     stdio: 'inherit', env: { ...process.env, PORT: port, PUBLIC_URL: publicUrl },
   });
@@ -45,4 +45,4 @@ if (process.env.TUNNEL_TOKEN) startServer(process.env.PUBLIC_URL || '');
 const stop = () => { tunnel.kill(); server?.kill(); process.exit(0); };
 process.on('SIGINT', stop);
 process.on('SIGTERM', stop);
-tunnel.on('exit', (code) => { console.error(`Tunnel het gestop (kode ${code}).`); server?.kill(); process.exit(1); });
+tunnel.on('exit', (code) => { console.error(`Tunnel stopped (code ${code}).`); server?.kill(); process.exit(1); });
