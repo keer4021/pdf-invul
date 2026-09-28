@@ -93,10 +93,20 @@ async function detectHeuristic(bytes) {
       if (right || (w <= 16 && Math.abs(w - h) < 3)) {
         pageFields.push({ type: 'checkbox', pageIndex, label: right ? right.s : '', x, y, width: w, height: h });
       } else {
-        pageFields.push({ type: 'text', src: 'cell', pageIndex, label: lastLabelAbove(words, x, y), x: x + 1, y: y + 1, width: w - 2, height: h - 2 });
+        pageFields.push({ type: 'text', src: 'cell', pageIndex, label: lastLabelAbove(words, x, y, w), x: x + 1, y: y + 1, width: w - 2, height: h - 2 });
       }
     }
-    fields.push(...dedupe(pageFields));
+    const kept = dedupe(pageFields);
+    // Tabelselle met dieselfde kolomopskrif kry 'n rynommer (van bo na onder)
+    const cols = new Map();
+    for (const f of kept.filter((f) => f.src === 'cell' && !f.comb && f.label).sort((p, q) => q.y - p.y)) {
+      const key = `${f.label}@${Math.round(f.x)}`;
+      const n = (cols.get(key) || 0) + 1;
+      cols.set(key, n);
+      f.row = n;
+    }
+    for (const f of kept) if (f.row && cols.get(`${f.label}@${Math.round(f.x)}`) > 1) f.label += ` ry ${f.row}`;
+    fields.push(...kept);
   }
   // Etikette vir blokkies sonder etiket: naaste teks regs daarvan
   return fields.map((f, i) => ({
@@ -177,17 +187,27 @@ function cellsFromLines(segs) {
   return cells.filter((c) => c.h > 6 && c.w > 6);
 }
 
-function lastLabelAbove(words, x, y) {
+// Etiket vir 'n sel: eers die kolomopskrif (teks bo die sel binne dieselfde kolom),
+// anders die naaste teks daarbo
+function lastLabelAbove(words, x, y, w = 0) {
+  const clean = (t) => t.s.replace(/[:.\s]+$/, '');
+  const inCol = words.filter((t) => t.y > y && t.y < y + 200 && t.x >= x - 2 && t.x < x + w - 2 && !/^_+$/.test(t.s))
+    .sort((p, q) => p.y - q.y)[0];
+  if (inCol) return clean(inCol);
   const c = words.filter((t) => t.y > y && t.y < y + 60 && !/^_+$/.test(t.s))
     .sort((p, q) => p.y - q.y)[0];
-  return c ? c.s.replace(/[:.\s]+$/, '') : '';
+  return c ? clean(c) : '';
 }
 
 function dedupe(list) {
   const out = [];
   for (const f of list) {
     // Voeg aangrensende onderstreep-stukke op dieselfde lyn saam
-    const join = out.find((o) => o.type === 'text' && f.type === 'text' && o.src === f.src &&
+    // Tabelselle word net saamgevoeg as hulle smal blokkies is (bv. 'n rekeningnommer);
+    // gewone tabelkolomme bly elk 'n eie veld.
+    const joinable = f.src !== 'cell' || f.width <= 35;
+    const join = joinable && out.find((o) => o.type === 'text' && f.type === 'text' && o.src === f.src &&
+      (o.src !== 'cell' || o.width / (o.comb || 1) <= 35) &&
       Math.abs(o.y - f.y) < 2 && f.x - (o.x + o.width) < 12 && f.x >= o.x);
     if (join) {
       join.width = Math.max(join.width, f.x + f.width - join.x);

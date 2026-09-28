@@ -4,8 +4,9 @@
   "description": "Webtoepassing: bespeur velde in PDF-vorms en vul dit in (PDF.js + pdf-lib)",
   "main": "src/server.mjs",
   "scripts": {
-    "start": "node src/server.mjs",
-    "dev": "node --watch src/server.mjs"
+    "start": "node --env-file-if-exists=.env src/server.mjs",
+    "dev": "node --watch --env-file-if-exists=.env src/server.mjs",
+    "tunnel": "node scripts/tunnel.mjs"
   },
   "keywords": [],
   "author": "",

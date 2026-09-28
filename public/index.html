@@ -9,17 +9,104 @@
 <body>
   <header>
     <h1>PDF-invul</h1>
-    <label class="btn">PDF oplaai <input type="file" id="file" accept="application/pdf" hidden></label>
-    <button id="sample">Sapex-voorbeeld</button>
-    <span class="sep"></span>
-    <label><input type="checkbox" id="edit"> Wysig velde</label>
+    <label class="btn owner">PDF oplaai <input type="file" id="file" accept="application/pdf" hidden></label>
+    <select id="forms" class="owner" title="Gestoorde vorms"><option value="">Gestoorde vorms…</option></select>
+    <button id="delForm" class="owner" title="Verwyder hierdie vorm" disabled>🗑</button>
+    <span class="sep owner"></span>
+    <label class="owner"><input type="checkbox" id="edit"> Wysig velde</label>
+    <button id="addField" class="owner" disabled>+ Nuwe veld</button>
+    <button id="addSig" class="owner" disabled>✍ Teken hier-veld</button>
     <label>Zoom <input type="range" id="zoom" min="0.8" max="2.2" step="0.1" value="1.4"></label>
     <span class="sep"></span>
+    <button id="save" disabled title="Ctrl+S">Stoor</button>
+    <button id="share" class="owner" disabled>Deel met span</button>
     <button id="dlFlat" disabled>Laai ingevulde PDF af</button>
-    <button id="dlFillable" disabled>Laai invulbare PDF af</button>
+    <button id="logout" class="owner" title="Meld af">Meld af</button>
   </header>
-  <p id="status">Laai 'n PDF op, of probeer die Sapex-voorbeeld.</p>
-  <main id="pages"></main>
+  <div class="wrap">
+    <aside id="names" class="owner">
+      <section id="props" hidden>
+        <h2>Veld</h2>
+        <label>Naam <input id="pName" autocomplete="off"></label>
+        <label>Tipe
+          <select id="pType">
+            <option value="text">Teks</option>
+            <option value="checkbox">Merkblokkie</option>
+            <option value="signature">Handtekening (Teken hier)</option>
+          </select>
+        </label>
+        <div class="grid2">
+          <label>X <input id="pX" type="number" step="0.5"></label>
+          <label>Y <input id="pY" type="number" step="0.5"></label>
+          <label>Breedte <input id="pW" type="number" step="0.5" min="2"></label>
+          <label>Hoogte <input id="pH" type="number" step="0.5" min="2"></label>
+        </div>
+        <p class="hint">In punte (1/72 duim), gemeet van links-bo van die bladsy.</p>
+        <label>Lettergrootte <input id="pSize" type="number" step="0.5" min="4" max="72" placeholder="outo"></label>
+        <label>Font
+          <select id="pFont">
+            <option value="helvetica">Helvetica</option>
+            <option value="helvetica-bold">Helvetica Vet</option>
+            <option value="times">Times</option>
+            <option value="times-bold">Times Vet</option>
+            <option value="courier">Courier</option>
+          </select>
+        </label>
+        <div class="grid2">
+          <button id="pCopy" type="button" title="Ctrl+C">Kopieer</button>
+          <button id="pPaste" type="button" title="Ctrl+V" disabled>Plak</button>
+        </div>
+        <button id="pDup" type="button" title="Ctrl+D">Dupliseer (onder)</button>
+        <button id="pDelete" type="button">Verwyder veld</button>
+      </section>
+      <h2>Name</h2>
+      <form id="addName"><input id="nameInput" placeholder="Nuwe naam…" autocomplete="off"><button>+</button></form>
+      <p class="hint">Sleep 'n naam na 'n veld. Plak gerus 'n lys (een per reël).</p>
+      <ul id="nameList"></ul>
+    </aside>
+    <div class="content">
+      <p id="status">Laai 'n PDF op, of kies 'n gestoorde vorm.</p>
+      <main id="pages"></main>
+    </div>
+  </div>
+
+  <dialog id="sigDlg">
+    <h2>Teken jou handtekening</h2>
+    <canvas id="sigPad" width="600" height="200"></canvas>
+    <p class="hint">Teken met die muis, vinger of pen. Of laai 'n prent van jou handtekening op.</p>
+    <div class="row">
+      <button id="sigClear" type="button">Wis uit</button>
+      <label class="btn">Laai prent op <input type="file" id="sigFile" accept="image/png,image/jpeg" hidden></label>
+      <span class="grow"></span>
+      <button id="sigRemove" type="button">Verwyder handtekening</button>
+      <button id="sigCancel" type="button">Kanselleer</button>
+      <button id="sigOk" type="button" class="primary">Gebruik</button>
+    </div>
+  </dialog>
+
+  <dialog id="loginDlg">
+    <form id="loginForm" method="dialog">
+      <h2>Meld aan</h2>
+      <p>Tik die eienaar-wagwoord om vorms op te laai, te wysig en te deel.</p>
+      <input id="loginPw" type="password" autocomplete="current-password" required>
+      <p class="hint" id="loginErr"></p>
+      <div class="row"><span class="grow"></span><button class="primary">Meld aan</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="shareDlg">
+    <h2>Deel met span</h2>
+    <p>Stuur hierdie skakel vir jou spanlede. Hulle kan die vorm invul en teken, maar nie die velde verander nie.</p>
+    <input id="shareUrl" readonly>
+    <p class="hint" id="shareHint"></p>
+    <div class="row">
+      <button id="shareCopy" type="button">Kopieer skakel</button>
+      <a id="shareMail" class="btn">Stuur per e-pos</a>
+      <span class="grow"></span>
+      <button id="shareClose" type="button" class="primary">Klaar</button>
+    </div>
+  </dialog>
+
   <script type="module" src="app.js"></script>
 </body>
 </html>
