@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="af">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PDF-invul</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>PDF-invul</h1>
+    <label class="btn">PDF oplaai <input type="file" id="file" accept="application/pdf" hidden></label>
+    <button id="sample">Sapex-voorbeeld</button>
+    <span class="sep"></span>
+    <label><input type="checkbox" id="edit"> Wysig velde</label>
+    <label>Zoom <input type="range" id="zoom" min="0.8" max="2.2" step="0.1" value="1.4"></label>
+    <span class="sep"></span>
+    <button id="dlFlat" disabled>Laai ingevulde PDF af</button>
+    <button id="dlFillable" disabled>Laai invulbare PDF af</button>
+  </header>
+  <p id="status">Laai 'n PDF op, of probeer die Sapex-voorbeeld.</p>
+  <main id="pages"></main>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
